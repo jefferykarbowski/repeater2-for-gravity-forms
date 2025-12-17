@@ -1083,12 +1083,13 @@ class GF_Field_Repeater2 extends GF_Field {
 			// Collect all renamed inputs for this repeater
 			foreach ( $_POST as $input_name => $input_value ) {
 				// Match pattern: input_{childId}-{repeaterId}-{iteration}
-				if ( preg_match( '/^input_([\d_]+)-' . $repeater2Id . '-(\d+)$/', $input_name, $matches ) ) {
+				// Note: childId can contain dots (Address: 173.3) or underscores (Name: 5_3)
+				if ( preg_match( '/^input_([\d_.]+)-' . $repeater2Id . '-(\d+)$/', $input_name, $matches ) ) {
 					$child_field_id = $matches[1];
 					$iteration = $matches[2];
 
-					// Normalize sub-input IDs (e.g., "5_3" -> "5" for grouping)
-					$base_field_id = explode( '_', $child_field_id )[0];
+					// Normalize sub-input IDs (e.g., "5_3" -> "5" or "173.3" -> "173" for grouping)
+					$base_field_id = preg_split( '/[_.]/', $child_field_id )[0];
 
 					if ( ! isset( $iteration_data[ $iteration ] ) ) {
 						$iteration_data[ $iteration ] = array();
@@ -1216,16 +1217,17 @@ class GF_Field_Repeater2 extends GF_Field {
 					$iteration_data = array();
 
 					// Collect all renamed inputs for this repeater from $_POST
+					// Note: childId can contain dots (Address: 173.3) or underscores (Name: 5_3)
 					$matched_inputs = array();
 					foreach ( $_POST as $input_name => $input_value ) {
-						if ( preg_match( '/^input_([\d_]+)-' . $repeater2Id . '-(\d+)$/', $input_name, $matches ) ) {
+						if ( preg_match( '/^input_([\d_.]+)-' . $repeater2Id . '-(\d+)$/', $input_name, $matches ) ) {
 							$child_field_id = $matches[1];
 							$iteration = $matches[2];
 
 							$matched_inputs[] = $input_name;
 
-							// Normalize sub-input IDs (e.g., "5_3" -> "5" for grouping)
-							$base_field_id = explode( '_', $child_field_id )[0];
+							// Normalize sub-input IDs (e.g., "5_3" -> "5" or "173.3" -> "173" for grouping)
+							$base_field_id = preg_split( '/[_.]/', $child_field_id )[0];
 
 							if ( ! isset( $iteration_data[ $iteration ] ) ) {
 								$iteration_data[ $iteration ] = array();
@@ -1312,15 +1314,16 @@ class GF_Field_Repeater2 extends GF_Field {
 		}
 
 		// Collect all renamed inputs for this repeater
+		// Note: childId can contain dots (Address: 173.3) or underscores (Name: 5_3)
 		$iteration_data = array();
 		foreach ( $_POST as $input_name => $input_value ) {
 			// Match pattern: input_{childId}-{repeaterId}-{iteration}
-			if ( preg_match( '/^input_([\d_]+)-' . $repeater2Id . '-(\d+)$/', $input_name, $matches ) ) {
+			if ( preg_match( '/^input_([\d_.]+)-' . $repeater2Id . '-(\d+)$/', $input_name, $matches ) ) {
 				$child_field_id = $matches[1];
 				$iteration = $matches[2];
 
-				// Normalize sub-input IDs (e.g., "5_3" -> "5" for grouping)
-				$base_field_id = explode( '_', $child_field_id )[0];
+				// Normalize sub-input IDs (e.g., "5_3" -> "5" or "173.3" -> "173" for grouping)
+				$base_field_id = preg_split( '/[_.]/', $child_field_id )[0];
 
 				if ( ! isset( $iteration_data[ $iteration ] ) ) {
 					$iteration_data[ $iteration ] = array();
@@ -1374,12 +1377,13 @@ class GF_Field_Repeater2 extends GF_Field {
 			// Collect all renamed inputs for this repeater
 			foreach ( $_POST as $input_name => $input_value ) {
 				// Match pattern: input_{childId}-{repeaterId}-{iteration}
-				if ( preg_match( '/^input_([\d_]+)-' . $repeater2Id . '-(\d+)$/', $input_name, $matches ) ) {
+				// Note: childId can contain dots (Address: 173.3) or underscores (Name: 5_3)
+				if ( preg_match( '/^input_([\d_.]+)-' . $repeater2Id . '-(\d+)$/', $input_name, $matches ) ) {
 					$child_field_id = $matches[1];
 					$iteration = $matches[2];
 
-					// Normalize sub-input IDs (e.g., "5_3" -> "5" for grouping)
-					$base_field_id = explode( '_', $child_field_id )[0];
+					// Normalize sub-input IDs (e.g., "5_3" -> "5" or "173.3" -> "173" for grouping)
+					$base_field_id = preg_split( '/[_.]/', $child_field_id )[0];
 
 					if ( ! isset( $iteration_data[ $iteration ] ) ) {
 						$iteration_data[ $iteration ] = array();

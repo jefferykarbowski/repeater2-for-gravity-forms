@@ -393,7 +393,7 @@ class GF_Field_Repeater2 extends GF_Field {
 	public function get_value_save_entry($value, $form, $input_name, $lead_id, $lead) {
 		// Debug logging
 		$debug_log = WP_CONTENT_DIR . '/repeater-debug.log';
-		$debug_enabled = false;
+		$debug_enabled = true;
 
 		if ( $debug_enabled ) {
 			file_put_contents( $debug_log, "\n\n=== " . date('Y-m-d H:i:s') . " get_value_save_entry ===\n", FILE_APPEND );
@@ -1088,8 +1088,11 @@ class GF_Field_Repeater2 extends GF_Field {
 					$child_field_id = $matches[1];
 					$iteration = $matches[2];
 
-					// Normalize sub-input IDs (e.g., "5_3" -> "5" or "173.3" -> "173" for grouping)
-					$base_field_id = preg_split( '/[_.]/', $child_field_id )[0];
+					// Extract base field ID and sub-input ID
+					// e.g., "172_3" -> base="172", sub="3"; "174" -> base="174", sub=null
+					$parts = preg_split( '/[_.]/', $child_field_id );
+					$base_field_id = $parts[0];
+					$sub_input_id = isset( $parts[1] ) ? $parts[1] : null;
 
 					if ( ! isset( $iteration_data[ $iteration ] ) ) {
 						$iteration_data[ $iteration ] = array();
@@ -1103,7 +1106,12 @@ class GF_Field_Repeater2 extends GF_Field {
 					if ( is_array( $input_value ) ) {
 						$iteration_data[ $iteration ][ $base_field_id ] = array_merge( $iteration_data[ $iteration ][ $base_field_id ], $input_value );
 					} else {
-						$iteration_data[ $iteration ][ $base_field_id ][] = $input_value;
+						// Store with sub-input ID as key if present, otherwise append
+						if ( $sub_input_id !== null ) {
+							$iteration_data[ $iteration ][ $base_field_id ][ $sub_input_id ] = $input_value;
+						} else {
+							$iteration_data[ $iteration ][ $base_field_id ][] = $input_value;
+						}
 					}
 				}
 			}
@@ -1128,7 +1136,7 @@ class GF_Field_Repeater2 extends GF_Field {
 
 		// Debug logging
 		$debug_log = WP_CONTENT_DIR . '/repeater-debug.log';
-		$debug_enabled = false;
+		$debug_enabled = true;
 
 		if ( $debug_enabled ) {
 			file_put_contents( $debug_log, "\n\n=== " . date('Y-m-d H:i:s') . " gform_modify_incomplete_submission_data ===\n", FILE_APPEND );
@@ -1226,8 +1234,11 @@ class GF_Field_Repeater2 extends GF_Field {
 
 							$matched_inputs[] = $input_name;
 
-							// Normalize sub-input IDs (e.g., "5_3" -> "5" or "173.3" -> "173" for grouping)
-							$base_field_id = preg_split( '/[_.]/', $child_field_id )[0];
+							// Extract base field ID and sub-input ID
+							// e.g., "172_3" -> base="172", sub="3"; "174" -> base="174", sub=null
+							$parts = preg_split( '/[_.]/', $child_field_id );
+							$base_field_id = $parts[0];
+							$sub_input_id = isset( $parts[1] ) ? $parts[1] : null;
 
 							if ( ! isset( $iteration_data[ $iteration ] ) ) {
 								$iteration_data[ $iteration ] = array();
@@ -1240,7 +1251,12 @@ class GF_Field_Repeater2 extends GF_Field {
 							if ( is_array( $input_value ) ) {
 								$iteration_data[ $iteration ][ $base_field_id ] = array_merge( $iteration_data[ $iteration ][ $base_field_id ], $input_value );
 							} else {
-								$iteration_data[ $iteration ][ $base_field_id ][] = $input_value;
+								// Store with sub-input ID as key if present, otherwise append
+								if ( $sub_input_id !== null ) {
+									$iteration_data[ $iteration ][ $base_field_id ][ $sub_input_id ] = $input_value;
+								} else {
+									$iteration_data[ $iteration ][ $base_field_id ][] = $input_value;
+								}
 							}
 						}
 					}
@@ -1322,8 +1338,11 @@ class GF_Field_Repeater2 extends GF_Field {
 				$child_field_id = $matches[1];
 				$iteration = $matches[2];
 
-				// Normalize sub-input IDs (e.g., "5_3" -> "5" or "173.3" -> "173" for grouping)
-				$base_field_id = preg_split( '/[_.]/', $child_field_id )[0];
+				// Extract base field ID and sub-input ID
+				// e.g., "172_3" -> base="172", sub="3"; "174" -> base="174", sub=null
+				$parts = preg_split( '/[_.]/', $child_field_id );
+				$base_field_id = $parts[0];
+				$sub_input_id = isset( $parts[1] ) ? $parts[1] : null;
 
 				if ( ! isset( $iteration_data[ $iteration ] ) ) {
 					$iteration_data[ $iteration ] = array();
@@ -1337,7 +1356,12 @@ class GF_Field_Repeater2 extends GF_Field {
 				if ( is_array( $input_value ) ) {
 					$iteration_data[ $iteration ][ $base_field_id ] = array_merge( $iteration_data[ $iteration ][ $base_field_id ], $input_value );
 				} else {
-					$iteration_data[ $iteration ][ $base_field_id ][] = $input_value;
+					// Store with sub-input ID as key if present, otherwise append
+					if ( $sub_input_id !== null ) {
+						$iteration_data[ $iteration ][ $base_field_id ][ $sub_input_id ] = $input_value;
+					} else {
+						$iteration_data[ $iteration ][ $base_field_id ][] = $input_value;
+					}
 				}
 			}
 		}
@@ -1382,8 +1406,11 @@ class GF_Field_Repeater2 extends GF_Field {
 					$child_field_id = $matches[1];
 					$iteration = $matches[2];
 
-					// Normalize sub-input IDs (e.g., "5_3" -> "5" or "173.3" -> "173" for grouping)
-					$base_field_id = preg_split( '/[_.]/', $child_field_id )[0];
+					// Extract base field ID and sub-input ID
+					// e.g., "172_3" -> base="172", sub="3"; "174" -> base="174", sub=null
+					$parts = preg_split( '/[_.]/', $child_field_id );
+					$base_field_id = $parts[0];
+					$sub_input_id = isset( $parts[1] ) ? $parts[1] : null;
 
 					if ( ! isset( $iteration_data[ $iteration ] ) ) {
 						$iteration_data[ $iteration ] = array();
@@ -1397,7 +1424,12 @@ class GF_Field_Repeater2 extends GF_Field {
 					if ( is_array( $input_value ) ) {
 						$iteration_data[ $iteration ][ $base_field_id ] = array_merge( $iteration_data[ $iteration ][ $base_field_id ], $input_value );
 					} else {
-						$iteration_data[ $iteration ][ $base_field_id ][] = $input_value;
+						// Store with sub-input ID as key if present, otherwise append
+						if ( $sub_input_id !== null ) {
+							$iteration_data[ $iteration ][ $base_field_id ][ $sub_input_id ] = $input_value;
+						} else {
+							$iteration_data[ $iteration ][ $base_field_id ][] = $input_value;
+						}
 					}
 				}
 			}
@@ -1424,7 +1456,7 @@ class GF_Field_Repeater2 extends GF_Field {
 
 		// Debug logging
 		$debug_log = WP_CONTENT_DIR . '/repeater-debug.log';
-		$debug_enabled = false;
+		$debug_enabled = true;
 
 		if ( $debug_enabled ) {
 			file_put_contents( $debug_log, "\n\n=== " . date('Y-m-d H:i:s') . " gform_restore_incomplete_submission ===\n", FILE_APPEND );
@@ -1503,27 +1535,43 @@ class GF_Field_Repeater2 extends GF_Field {
 					}
 
 					// Store the data for this iteration
-					if ( is_array( $inputData ) && count( $inputData ) === 1 ) {
-						// Single-value field
-						$children_meta[ $child_field_id ]['prePopulate'][ $iteration ] = $inputData[0];
-					} elseif ( is_array( $inputData ) && count( $inputData ) > 1 ) {
-						// Multi-input field (name, address, etc.) - store by sub-input ID
-						$child_field_index = GF_Field_Repeater2::get_field_index( $form, 'id', $child_field_id );
-						if ( $child_field_index !== false ) {
-							$child_field = $form['fields'][ $child_field_index ];
-							if ( isset( $child_field->inputs ) && is_array( $child_field->inputs ) ) {
-								foreach ( $child_field->inputs as $input_index => $input ) {
-									$sub_input_id = str_replace( $child_field_id . '.', '', $input['id'] );
-									if ( ! isset( $children_meta[ $child_field_id ]['prePopulate'][ $sub_input_id ] ) ) {
-										$children_meta[ $child_field_id ]['prePopulate'][ $sub_input_id ] = array();
-									}
-									if ( isset( $inputData[ $input_index ] ) && $inputData[ $input_index ] !== '' ) {
-										$children_meta[ $child_field_id ]['prePopulate'][ $sub_input_id ][ $iteration ] = $inputData[ $input_index ];
+					if ( is_array( $inputData ) ) {
+						// Check if this is the new format with sub-input IDs as keys (non-numeric keys like '3', '6')
+						$keys = array_keys( $inputData );
+						$has_sub_input_keys = ! empty( $keys ) && ! is_int( $keys[0] ) && is_numeric( $keys[0] );
+
+						if ( $has_sub_input_keys ) {
+							// New format: sub-input IDs as keys (e.g., ['3' => 'John', '6' => 'Doe'])
+							foreach ( $inputData as $sub_input_id => $value ) {
+								if ( ! isset( $children_meta[ $child_field_id ]['prePopulate'][ $sub_input_id ] ) ) {
+									$children_meta[ $child_field_id ]['prePopulate'][ $sub_input_id ] = array();
+								}
+								if ( $value !== '' ) {
+									$children_meta[ $child_field_id ]['prePopulate'][ $sub_input_id ][ $iteration ] = $value;
+								}
+							}
+						} elseif ( count( $inputData ) === 1 ) {
+							// Single-value field (old format or simple field)
+							$children_meta[ $child_field_id ]['prePopulate'][ $iteration ] = reset( $inputData );
+						} elseif ( count( $inputData ) > 1 ) {
+							// Old format: Multi-input field with numeric indices - store by sub-input ID via field lookup
+							$child_field_index = GF_Field_Repeater2::get_field_index( $form, 'id', $child_field_id );
+							if ( $child_field_index !== false ) {
+								$child_field = $form['fields'][ $child_field_index ];
+								if ( isset( $child_field->inputs ) && is_array( $child_field->inputs ) ) {
+									foreach ( $child_field->inputs as $input_index => $input ) {
+										$sub_input_id = str_replace( $child_field_id . '.', '', $input['id'] );
+										if ( ! isset( $children_meta[ $child_field_id ]['prePopulate'][ $sub_input_id ] ) ) {
+											$children_meta[ $child_field_id ]['prePopulate'][ $sub_input_id ] = array();
+										}
+										if ( isset( $inputData[ $input_index ] ) && $inputData[ $input_index ] !== '' ) {
+											$children_meta[ $child_field_id ]['prePopulate'][ $sub_input_id ][ $iteration ] = $inputData[ $input_index ];
+										}
 									}
 								}
 							}
 						}
-					} elseif ( ! is_array( $inputData ) && $inputData !== '[gfRepeater-section]' && $inputData !== '' ) {
+					} elseif ( $inputData !== '[gfRepeater-section]' && $inputData !== '' ) {
 						// Non-array value
 						$children_meta[ $child_field_id ]['prePopulate'][ $iteration ] = $inputData;
 					}
@@ -1550,25 +1598,39 @@ class GF_Field_Repeater2 extends GF_Field {
 					$renamed_input = 'input_' . $child_field_id . '-' . $repeater2Id . '-' . $iteration;
 
 					// Set the value in submitted_values
-					if ( is_array( $inputData ) && count( $inputData ) === 1 ) {
-						$submission->submitted_values->{$renamed_input} = $inputData[0];
-					} elseif ( is_array( $inputData ) && count( $inputData ) > 1 ) {
-						// Multi-value field - set each sub-input
-						$child_field_index = GF_Field_Repeater2::get_field_index( $form, 'id', $child_field_id );
-						if ( $child_field_index !== false ) {
-							$child_field = $form['fields'][ $child_field_index ];
-							if ( isset( $child_field->inputs ) && is_array( $child_field->inputs ) ) {
-								// This is a multi-input field like name or address
-								foreach ( $child_field->inputs as $input_index => $input ) {
-									$input_id = str_replace( '.', '_', $input['id'] );
-									$renamed_sub_input = 'input_' . $input_id . '-' . $repeater2Id . '-' . $iteration;
-									if ( isset( $inputData[ $input_index ] ) ) {
-										$submission->submitted_values->{$renamed_sub_input} = $inputData[ $input_index ];
+					if ( is_array( $inputData ) ) {
+						// Check if this is the new format with sub-input IDs as keys (non-numeric keys like '3', '6')
+						$keys = array_keys( $inputData );
+						$has_sub_input_keys = ! empty( $keys ) && ! is_int( $keys[0] ) && is_numeric( $keys[0] );
+
+						if ( $has_sub_input_keys ) {
+							// New format: sub-input IDs as keys - use the sub-input ID directly
+							foreach ( $inputData as $sub_input_id => $value ) {
+								// Use dot notation to match HTML input names (input_172.3-8-1)
+								$renamed_sub_input = 'input_' . $child_field_id . '.' . $sub_input_id . '-' . $repeater2Id . '-' . $iteration;
+								$submission->submitted_values->{$renamed_sub_input} = $value;
+							}
+						} elseif ( count( $inputData ) === 1 ) {
+							// Single-value field
+							$submission->submitted_values->{$renamed_input} = reset( $inputData );
+						} elseif ( count( $inputData ) > 1 ) {
+							// Old format: Multi-value field with numeric indices - set each sub-input via field lookup
+							$child_field_index = GF_Field_Repeater2::get_field_index( $form, 'id', $child_field_id );
+							if ( $child_field_index !== false ) {
+								$child_field = $form['fields'][ $child_field_index ];
+								if ( isset( $child_field->inputs ) && is_array( $child_field->inputs ) ) {
+									// This is a multi-input field like name or address
+									foreach ( $child_field->inputs as $input_index => $input ) {
+										// Use dot notation to match HTML input names (input_172.3-8-1)
+										$renamed_sub_input = 'input_' . $input['id'] . '-' . $repeater2Id . '-' . $iteration;
+										if ( isset( $inputData[ $input_index ] ) ) {
+											$submission->submitted_values->{$renamed_sub_input} = $inputData[ $input_index ];
+										}
 									}
 								}
 							}
 						}
-					} elseif ( ! is_array( $inputData ) && $inputData !== '[gfRepeater-section]' ) {
+					} elseif ( $inputData !== '[gfRepeater-section]' ) {
 						$submission->submitted_values->{$renamed_input} = $inputData;
 					}
 				}

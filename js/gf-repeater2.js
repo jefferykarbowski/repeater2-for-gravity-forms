@@ -242,13 +242,24 @@ function gfRepeater_getRepeaters() {
                                     inputPrePopulate = childInfo['prePopulate'];
                                 } else {
                                     // Check if this is a multi-input field (name, address, etc.) with sub-input data
-                                    var subInputId = inputName2.split('_')[1];
-                                    if (childInfo['prePopulate'][subInputId]) {
+                                    // Input name format: input_fieldId.subInputId (e.g., input_172.3)
+                                    var fieldIdPart = inputName2.replace(/^input_/, ''); // Remove 'input_' prefix
+                                    var subInputId = null;
+
+                                    // Check for dot notation (e.g., "172.3" -> subInputId = "3")
+                                    if (fieldIdPart.indexOf('.') !== -1) {
+                                        subInputId = fieldIdPart.split('.')[1];
+                                    }
+
+                                    if (subInputId && childInfo['prePopulate'][subInputId]) {
                                         // Multi-input field: use sub-input specific prePopulate
                                         inputPrePopulate = childInfo['prePopulate'][subInputId];
-                                    } else {
+                                    } else if (!subInputId) {
                                         // Simple single-input field: use entire prePopulate object (iteration-based)
                                         inputPrePopulate = childInfo['prePopulate'];
+                                    } else {
+                                        // Multi-input field but this sub-input has no prePopulate data
+                                        inputPrePopulate = {};
                                     }
                                 }
 

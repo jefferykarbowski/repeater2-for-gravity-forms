@@ -1574,21 +1574,33 @@ class GF_Field_Repeater2 extends GF_Field {
 							// Single-value field (old format or simple field)
 							$children_meta[ $child_field_id ]['prePopulate'][ $iteration ] = reset( $inputData );
 						} elseif ( count( $inputData ) > 1 ) {
-							// Old format: Multi-input field with numeric indices - store by sub-input ID via field lookup
+							// Multiple values with numeric indices - could be checkbox/multiselect OR old format multi-input field
+							// Check the field type to determine how to handle
 							$child_field_index = GF_Field_Repeater2::get_field_index( $form, 'id', $child_field_id );
+							$child_field_type = null;
 							if ( $child_field_index !== false ) {
 								$child_field = $form['fields'][ $child_field_index ];
-								if ( isset( $child_field->inputs ) && is_array( $child_field->inputs ) ) {
-									foreach ( $child_field->inputs as $input_index => $input ) {
-										$sub_input_id = str_replace( $child_field_id . '.', '', $input['id'] );
-										if ( ! isset( $children_meta[ $child_field_id ]['prePopulate'][ $sub_input_id ] ) ) {
-											$children_meta[ $child_field_id ]['prePopulate'][ $sub_input_id ] = array();
-										}
-										if ( isset( $inputData[ $input_index ] ) && $inputData[ $input_index ] !== '' ) {
-											$children_meta[ $child_field_id ]['prePopulate'][ $sub_input_id ][ $iteration ] = $inputData[ $input_index ];
-										}
+								$child_field_type = $child_field->type;
+							}
+
+							// Checkbox, radio, and multiselect values should be joined with commas
+							if ( in_array( $child_field_type, array( 'checkbox', 'radio', 'multiselect' ), true ) ) {
+								// Join multiple selections with commas for simple iteration-based prePopulate
+								$children_meta[ $child_field_id ]['prePopulate'][ $iteration ] = implode( ',', array_filter( $inputData, function( $v ) { return $v !== ''; } ) );
+							} elseif ( $child_field_index !== false && isset( $child_field->inputs ) && is_array( $child_field->inputs ) ) {
+								// Old format: Multi-input field with numeric indices - store by sub-input ID via field lookup
+								foreach ( $child_field->inputs as $input_index => $input ) {
+									$sub_input_id = str_replace( $child_field_id . '.', '', $input['id'] );
+									if ( ! isset( $children_meta[ $child_field_id ]['prePopulate'][ $sub_input_id ] ) ) {
+										$children_meta[ $child_field_id ]['prePopulate'][ $sub_input_id ] = array();
+									}
+									if ( isset( $inputData[ $input_index ] ) && $inputData[ $input_index ] !== '' ) {
+										$children_meta[ $child_field_id ]['prePopulate'][ $sub_input_id ][ $iteration ] = $inputData[ $input_index ];
 									}
 								}
+							} else {
+								// Unknown field type with multiple values - join with commas as fallback
+								$children_meta[ $child_field_id ]['prePopulate'][ $iteration ] = implode( ',', array_filter( $inputData, function( $v ) { return $v !== ''; } ) );
 							}
 						}
 					} elseif ( $inputData !== '[gfRepeater-section]' && $inputData !== '' ) {

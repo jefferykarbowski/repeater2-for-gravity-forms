@@ -1536,12 +1536,13 @@ class GF_Field_Repeater2 extends GF_Field {
 
 					// Store the data for this iteration
 					if ( is_array( $inputData ) ) {
-						// Check if this is the new format with sub-input IDs as keys (non-numeric keys like '3', '6')
+						// Check if this is the new format with sub-input IDs as keys
+						// New format has non-sequential keys (3, 6) vs old format has sequential keys (0, 1)
 						$keys = array_keys( $inputData );
-						$has_sub_input_keys = ! empty( $keys ) && ! is_int( $keys[0] ) && is_numeric( $keys[0] );
+						$has_sub_input_keys = ! empty( $keys ) && $keys[0] !== 0;
 
 						if ( $has_sub_input_keys ) {
-							// New format: sub-input IDs as keys (e.g., ['3' => 'John', '6' => 'Doe'])
+							// New format: sub-input IDs as keys (e.g., [3 => 'John', 6 => 'Doe'])
 							foreach ( $inputData as $sub_input_id => $value ) {
 								if ( ! isset( $children_meta[ $child_field_id ]['prePopulate'][ $sub_input_id ] ) ) {
 									$children_meta[ $child_field_id ]['prePopulate'][ $sub_input_id ] = array();
@@ -1599,9 +1600,10 @@ class GF_Field_Repeater2 extends GF_Field {
 
 					// Set the value in submitted_values
 					if ( is_array( $inputData ) ) {
-						// Check if this is the new format with sub-input IDs as keys (non-numeric keys like '3', '6')
+						// Check if this is the new format with sub-input IDs as keys
+						// New format has non-sequential keys (3, 6) vs old format has sequential keys (0, 1)
 						$keys = array_keys( $inputData );
-						$has_sub_input_keys = ! empty( $keys ) && ! is_int( $keys[0] ) && is_numeric( $keys[0] );
+						$has_sub_input_keys = ! empty( $keys ) && $keys[0] !== 0;
 
 						if ( $has_sub_input_keys ) {
 							// New format: sub-input IDs as keys - use the sub-input ID directly

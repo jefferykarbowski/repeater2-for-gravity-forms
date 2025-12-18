@@ -866,9 +866,28 @@ class GF_Field_Repeater2 extends GF_Field {
 				}
 
 				// Store the data for this iteration
-				if ( is_array( $inputData ) && count( $inputData ) === 1 ) {
-					$children_meta[ $child_field_id ]['prePopulate'][ $iteration ] = $inputData[0];
-				} elseif ( ! is_array( $inputData ) && $inputData !== '[gfRepeater-section]' && $inputData !== '' ) {
+				if ( is_array( $inputData ) ) {
+					// Check if this is new format with sub-input IDs as keys (first key !== 0)
+					$keys = array_keys( $inputData );
+					$has_sub_input_keys = ! empty( $keys ) && $keys[0] !== 0;
+
+					if ( $has_sub_input_keys ) {
+						// New format: sub-input IDs as keys (e.g., [3 => 'John', 6 => 'Doe'])
+						foreach ( $inputData as $sub_input_id => $value ) {
+							if ( ! isset( $children_meta[ $child_field_id ]['prePopulate'][ $sub_input_id ] ) ) {
+								$children_meta[ $child_field_id ]['prePopulate'][ $sub_input_id ] = array();
+							}
+							if ( $value !== '' ) {
+								$children_meta[ $child_field_id ]['prePopulate'][ $sub_input_id ][ $iteration ] = $value;
+							}
+						}
+					} elseif ( count( $inputData ) === 1 ) {
+						// Single-value field
+						$children_meta[ $child_field_id ]['prePopulate'][ $iteration ] = reset( $inputData );
+					}
+					// Note: old format multi-value arrays (count > 1, sequential keys) are not supported here
+				} elseif ( $inputData !== '[gfRepeater-section]' && $inputData !== '' ) {
+					// Non-array value
 					$children_meta[ $child_field_id ]['prePopulate'][ $iteration ] = $inputData;
 				}
 			}

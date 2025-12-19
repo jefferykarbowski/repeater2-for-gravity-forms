@@ -412,7 +412,27 @@ function gfRepeater_setRepeaterChildAttrs(formId, repeater2Id, repeater2ChildEle
 
             if (prePopulate) {
                 if (childType == 'checkbox' || childType == 'radio') {
-                    prePopulateValues = prePopulate.split(',');
+                    // Handle both string format ("value1,value2") and object format ({iteration: value})
+                    var prePopulateStr = '';
+                    if (typeof prePopulate === 'string') {
+                        prePopulateStr = prePopulate;
+                    } else if (typeof prePopulate === 'object') {
+                        // Object format - extract values and join with commas
+                        var values = [];
+                        jQuery.each(prePopulate, function(k, v) {
+                            if (typeof v === 'string' && v !== '') {
+                                values.push(v);
+                            } else if (typeof v === 'object') {
+                                // Nested object - extract inner values
+                                jQuery.each(v, function(k2, v2) {
+                                    if (v2 !== '') values.push(v2);
+                                });
+                            }
+                        });
+                        prePopulateStr = values.join(',');
+                    }
+
+                    prePopulateValues = prePopulateStr.split(',');
                     if (jQuery.inArray(key, prePopulateValues) !== -1) {
                         prePopulate = true;
                     } else {

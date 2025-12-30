@@ -1,6 +1,142 @@
+// IMMEDIATE DEBUG - This logs as soon as the file is parsed (before DOM ready)
+console.log('[Repeater2] ========================================');
+console.log('[Repeater2] gf-repeater2.js loaded - Version 2.3.9');
+console.log('[Repeater2] ========================================');
+
 var gfRepeater_repeater2s = {};
 var gfRepeater_submitted = false;
+var gfRepeater_preserved_values = {}; // Stores values from renamed inputs to preserve during re-initialization
+var gfRepeater_live_values = {}; // Stores values captured in real-time as user types
 // Removed gfRepeater_repeater2s_is_set to allow re-initialization for multiple forms/caching
+
+/*
+    gfRepeater_captureRenamedInputValues()
+        Captures all values from already-renamed repeater inputs before re-initialization.
+        This prevents value loss when gform_post_render fires and the repeater JS re-initializes.
+*/
+function gfRepeater_captureRenamedInputValues() {
+    console.log('[Repeater2] Capturing renamed input values...');
+    var capturedCount = 0;
+
+    jQuery('.gform_wrapper').each(function() {
+        var formId = this.id.split('_')[2];
+        if (!formId) return;
+
+        if (!gfRepeater_preserved_values[formId]) {
+            gfRepeater_preserved_values[formId] = {};
+        }
+
+        // Find all inputs with renamed pattern: input_{childId}-{repeaterId}-{iteration}
+        jQuery(this).find(':input').each(function() {
+            var inputName = jQuery(this).attr('name');
+            if (!inputName) return;
+
+            // Match pattern: input_{childId}-{repeaterId}-{iteration} or with [] suffix
+            var match = inputName.match(/^(input_[\d_.]+)-(\d+)-(\d+)(\[\])?$/);
+            if (match) {
+                var value = gfRepeater_getInputValue(jQuery(this));
+
+                // Only preserve non-empty values (don't overwrite with empty)
+                if (value !== '' && value !== false) {
+                    gfRepeater_preserved_values[formId][inputName] = value;
+                    capturedCount++;
+                }
+            }
+        });
+
+        // Also merge in any live-captured values
+        if (gfRepeater_live_values[formId]) {
+            jQuery.each(gfRepeater_live_values[formId], function(inputName, value) {
+                if (value !== '' && value !== false) {
+                    gfRepeater_preserved_values[formId][inputName] = value;
+                }
+            });
+        }
+    });
+
+    console.log('[Repeater2] Captured ' + capturedCount + ' values from DOM, preserved values:', gfRepeater_preserved_values);
+}
+
+/*
+    gfRepeater_restorePreservedValues()
+        Restores preserved values to renamed inputs after re-initialization.
+*/
+function gfRepeater_restorePreservedValues() {
+    jQuery.each(gfRepeater_preserved_values, function(formId, inputs) {
+        jQuery.each(inputs, function(inputName, value) {
+            // Find the input by name
+            var inputElement = jQuery('[name="' + inputName + '"]');
+            if (inputElement.length && value !== '' && value !== false) {
+                // Only restore if current value is empty (don't overwrite prePopulate values)
+                var currentValue = gfRepeater_getInputValue(inputElement);
+                if (currentValue === '' || currentValue === false) {
+                    gfRepeater_setInputValue(inputElement, value);
+                }
+            }
+        });
+    });
+}
+
+/*
+    gfRepeater_setupLiveCapture()
+        Sets up event listeners to capture input values as user types.
+        This ensures values are stored even before gform_post_render fires.
+*/
+function gfRepeater_setupLiveCapture(formId) {
+    console.log('[Repeater2] Setting up live capture for form:', formId);
+
+    // Use event delegation on the form to capture all repeater input changes
+    jQuery('#gform_' + formId).off('change.repeater2 input.repeater2 blur.repeater2')
+        .on('change.repeater2 input.repeater2 blur.repeater2', ':input', function() {
+            var inputName = jQuery(this).attr('name');
+            if (!inputName) return;
+
+            // Only capture renamed inputs (input_{childId}-{repeaterId}-{iteration})
+            var match = inputName.match(/^(input_[\d_.]+)-(\d+)-(\d+)(\[\])?$/);
+            if (match) {
+                var value = gfRepeater_getInputValue(jQuery(this));
+
+                if (!gfRepeater_live_values[formId]) {
+                    gfRepeater_live_values[formId] = {};
+                }
+
+                // Store the value (even if empty, to track which fields have been interacted with)
+                if (value !== '' && value !== false) {
+                    gfRepeater_live_values[formId][inputName] = value;
+                    // Also update preserved values immediately
+                    if (!gfRepeater_preserved_values[formId]) {
+                        gfRepeater_preserved_values[formId] = {};
+                    }
+                    gfRepeater_preserved_values[formId][inputName] = value;
+                    console.log('[Repeater2] Live captured:', inputName, '=', value);
+                }
+            }
+        });
+}
+
+/*
+    gfRepeater_storeValuesToHiddenField()
+        Stores all captured values to a hidden field for form submission backup.
+*/
+function gfRepeater_storeValuesToHiddenField(formId) {
+    var hiddenFieldId = 'gf_repeater2_preserved_' + formId;
+    var hiddenField = jQuery('#' + hiddenFieldId);
+
+    if (!hiddenField.length) {
+        hiddenField = jQuery('<input type="hidden" id="' + hiddenFieldId + '" name="gf_repeater2_preserved_values" />');
+        jQuery('#gform_' + formId).append(hiddenField);
+    }
+
+    var allValues = {};
+    if (gfRepeater_preserved_values[formId]) {
+        jQuery.extend(allValues, gfRepeater_preserved_values[formId]);
+    }
+    if (gfRepeater_live_values[formId]) {
+        jQuery.extend(allValues, gfRepeater_live_values[formId]);
+    }
+
+    hiddenField.val(JSON.stringify(allValues));
+}
 
 /*
     gfRepeater_getRepeaters()
@@ -1132,6 +1268,9 @@ function gfRepeater_start() {
             gfRepeater_updateDataElement(formId, repeater2Id);
         });
 
+        // Set up live value capture for this form
+        gfRepeater_setupLiveCapture(formId);
+
         jQuery(form).trigger('gform_repeater2_init_done');
     });
 
@@ -1142,11 +1281,96 @@ function gfRepeater_start() {
 // Initiation after gravity forms has rendered.
 // NOTE: Removed the gfRepeater_repeater2s_is_set flag to allow re-initialization for multiple forms
 // and Gravity Forms caching/re-rendering. Event handlers use .off() to prevent duplicates.
-jQuery(document).bind('gform_post_render', function () {
+jQuery(document).bind('gform_post_render', function (event, formId) {
+    // IMPORTANT: Capture values from already-renamed inputs BEFORE re-initialization
+    // This prevents value loss when gform_post_render fires multiple times
+    gfRepeater_captureRenamedInputValues();
+
     if (gfRepeater_getRepeaters()) {
         gfRepeater_start();
+
+        // Restore any preserved values that were lost during re-initialization
+        gfRepeater_restorePreservedValues();
+
+        // Also store values to hidden field as backup
+        jQuery('.gform_wrapper').each(function() {
+            var fId = this.id.split('_')[2];
+            if (fId) {
+                gfRepeater_storeValuesToHiddenField(fId);
+            }
+        });
+
         jQuery(window).trigger('gform_repeater2_init_done');
     } else {
         console.log('There was an error with one of your repeater2s. This is usually caused by forgetting to include a repeater2-end field or by trying to nest repeater2s.');
     }
+});
+
+// Hook into form submission to ensure values are preserved
+// This is a safeguard in case gform_post_render fires during submission
+jQuery(document).on('submit', 'form[id^="gform_"]', function(e) {
+    var formId = jQuery(this).attr('id').replace('gform_', '');
+    console.log('[Repeater2] Form submit event for form:', formId);
+    console.log('[Repeater2] Live values at submission:', gfRepeater_live_values);
+    console.log('[Repeater2] Preserved values at submission:', gfRepeater_preserved_values);
+
+    // Capture any remaining values
+    gfRepeater_captureRenamedInputValues();
+
+    // Restore preserved values right before submission
+    gfRepeater_restorePreservedValues();
+
+    // Store to hidden field as final backup
+    gfRepeater_storeValuesToHiddenField(formId);
+
+    // Log the hidden field value
+    var hiddenField = jQuery('#gf_repeater2_preserved_' + formId);
+    if (hiddenField.length) {
+        console.log('[Repeater2] Hidden field value:', hiddenField.val());
+    }
+});
+
+// Also hook into Gravity Forms pre-submission event
+jQuery(document).bind('gform_pre_submission', function(event, formId) {
+    // Capture and restore values before GF processes the submission
+    gfRepeater_captureRenamedInputValues();
+    gfRepeater_restorePreservedValues();
+
+    // Store to hidden field as final backup
+    gfRepeater_storeValuesToHiddenField(formId);
+});
+
+// Hook into page change events to capture values when navigating between pages
+jQuery(document).bind('gform_page_loaded', function(event, formId, currentPage) {
+    console.log('[Repeater2] gform_page_loaded fired for form:', formId, 'page:', currentPage);
+
+    // When a new page is loaded, restore any preserved values
+    gfRepeater_restorePreservedValues();
+
+    // Set up live capture for the new page
+    gfRepeater_setupLiveCapture(formId);
+});
+
+// Hook into page change BEFORE it happens to capture current values
+jQuery(document).on('click', '.gform_next_button, .gform_previous_button, .gform_button[type="submit"]', function(e) {
+    var form = jQuery(this).closest('form');
+    var formId = form.attr('id') ? form.attr('id').replace('gform_', '') : null;
+
+    console.log('[Repeater2] Navigation/submit button clicked, capturing values for form:', formId);
+
+    // Capture values from all renamed inputs before the form is submitted
+    gfRepeater_captureRenamedInputValues();
+
+    // Store to hidden field
+    if (formId) {
+        gfRepeater_storeValuesToHiddenField(formId);
+    }
+
+    // Log current state
+    console.log('[Repeater2] Values captured before navigation:', gfRepeater_preserved_values);
+});
+
+// Hook into GF's confirmation display (for non-AJAX submissions)
+jQuery(document).bind('gform_confirmation_loaded', function(event, formId) {
+    console.log('[Repeater2] Confirmation loaded for form:', formId);
 });

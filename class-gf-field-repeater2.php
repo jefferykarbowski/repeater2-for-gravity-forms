@@ -32,6 +32,9 @@ class GF_Field_Repeater2 extends GF_Field {
         add_filter( 'gform_incomplete_submission_post_get', array( 'GF_Field_Repeater2', 'gform_restore_incomplete_submission' ), 10, 3 );
         add_filter( 'gform_post_paging', array( 'GF_Field_Repeater2', 'gform_capture_repeater_on_page_change' ), 1, 3 );
         add_filter( 'gform_save_field_value', array( 'GF_Field_Repeater2', 'gform_save_repeater_field_value' ), 10, 5 );
+        add_action( 'gform_after_submission', array( 'GF_Field_Repeater2', 'gform_cleanup_repeater_transients' ), 10, 2 );
+        // Capture repeater values right before submission to ensure they're available for processing
+        add_action( 'gform_pre_submission', array( 'GF_Field_Repeater2', 'gform_capture_repeater_on_submission' ), 1 );
     }
 
     public static function gform_enqueue_scripts( $form, $is_ajax ) {
@@ -399,6 +402,26 @@ class GF_Field_Repeater2 extends GF_Field {
 			file_put_contents( $debug_log, "\n\n=== " . date('Y-m-d H:i:s') . " get_value_save_entry ===\n", FILE_APPEND );
 			file_put_contents( $debug_log, "Input name: " . $input_name . "\n", FILE_APPEND );
 			file_put_contents( $debug_log, "Raw value: " . substr( $value, 0, 300 ) . "...\n", FILE_APPEND );
+
+			// Dump POST keys that match repeater patterns for this field
+			$field_id = str_replace('input_', '', $input_name);
+			file_put_contents( $debug_log, "Looking for POST keys with pattern input_*-*-*:\n", FILE_APPEND );
+			foreach ( $_POST as $key => $val ) {
+				if ( preg_match( '/^input_[\d_.]+\-\d+\-\d+/', $key ) ) {
+					$val_str = is_array($val) ? json_encode($val) : $val;
+					file_put_contents( $debug_log, "  POST[$key] = " . substr($val_str, 0, 100) . "\n", FILE_APPEND );
+				}
+			}
+		}
+
+		// Retrieve transient data for fields on previous pages (captured during page navigation)
+		$repeater_field_id = str_replace( 'input_', '', $input_name );
+		$transient_key = 'gf_repeater_form_' . $form['id'] . '_field_' . $repeater_field_id;
+		$transient_data = get_transient( $transient_key );
+
+		if ( $debug_enabled ) {
+			file_put_contents( $debug_log, "Transient key: " . $transient_key . "\n", FILE_APPEND );
+			file_put_contents( $debug_log, "Transient data: " . ( $transient_data ? print_r( $transient_data, true ) : 'EMPTY' ) . "\n", FILE_APPEND );
 		}
 
 		$dataArray = json_decode($value, true);
@@ -440,7 +463,7 @@ class GF_Field_Repeater2 extends GF_Field {
 							$getInputName_clean = str_replace('.', '_', strval($getInputName));
 							$getInputData = rgpost($getInputName_clean);
 
-							// If not in POST, try to get from prePopulate (for fields on previous pages)
+							// If not in POST, try to get from prePopulate (for fields on previous pages - Save and Continue)
 							if (empty($getInputData) && isset($field['prePopulate'])) {
 								// Check if this is a sub-input field (e.g., input_172.3)
 								$inputNameParts = explode('.', $inputName);
@@ -454,6 +477,51 @@ class GF_Field_Repeater2 extends GF_Field {
 									// Simple field - prePopulate structure is [iteration]
 									if (isset($field['prePopulate'][$i])) {
 										$getInputData = $field['prePopulate'][$i];
+									}
+								}
+							}
+
+							// If still empty, try to get from transient data (for fields on previous pages - Direct submission)
+							if (empty($getInputData) && !empty($transient_data) && isset($transient_data[$i])) {
+								// Parse the input name to get base field ID and sub-input ID
+								// inputName format: "input_172.3" or "input_174"
+								$inputNameClean = preg_replace('/^input_/', '', $inputName);
+								$inputNameClean = rtrim($inputNameClean, '[]'); // Remove trailing []
+								$nameParts = explode('.', $inputNameClean);
+								$base_field_id = $nameParts[0];
+								$sub_input_id = isset($nameParts[1]) ? $nameParts[1] : null;
+
+								if (isset($transient_data[$i][$base_field_id])) {
+									$transient_field_data = $transient_data[$i][$base_field_id];
+									if ($sub_input_id !== null && isset($transient_field_data[$sub_input_id])) {
+										// Multi-input field with specific sub-input
+										$getInputData = $transient_field_data[$sub_input_id];
+									} elseif ($sub_input_id === null && is_array($transient_field_data)) {
+										// Simple field - get first value if array, or the value itself
+										if (isset($transient_field_data[0])) {
+											$getInputData = $transient_field_data[0];
+										} elseif (!empty($transient_field_data)) {
+											// May be associative array for multi-input stored differently
+											$getInputData = reset($transient_field_data);
+										}
+									} elseif (!is_array($transient_field_data)) {
+										// Direct value
+										$getInputData = $transient_field_data;
+									}
+
+									if ( $debug_enabled && $i == 1 ) {
+										file_put_contents( $debug_log, "Retrieved from transient for " . $inputName . " iteration " . $i . ": " . print_r($getInputData, true) . "\n", FILE_APPEND );
+									}
+								}
+							}
+
+							// If still empty, try to get from hidden field backup (JavaScript preserved values)
+							if (empty($getInputData) && isset($_POST['gf_repeater2_preserved_values'])) {
+								$preserved_values = json_decode(stripslashes($_POST['gf_repeater2_preserved_values']), true);
+								if (!empty($preserved_values) && isset($preserved_values[$getInputName_clean])) {
+									$getInputData = $preserved_values[$getInputName_clean];
+									if ( $debug_enabled && $i == 1 ) {
+										file_put_contents( $debug_log, "Retrieved from hidden field backup for " . $getInputName_clean . ": " . print_r($getInputData, true) . "\n", FILE_APPEND );
 									}
 								}
 							}
@@ -1059,17 +1127,42 @@ class GF_Field_Repeater2 extends GF_Field {
 	public static function gform_capture_repeater_on_page_change( $form, $source_page, $current_page ) {
 		// This hook fires when navigating between pages (Next/Previous)
 		// We capture renamed repeater inputs and store them in transients for later retrieval during save
-		// IMPORTANT: Only store data for fields on the SOURCE page (the page we're leaving)
 
-		// Check for resume token in POST
-		$resume_token = isset( $_POST['gform_resume_token'] ) ? $_POST['gform_resume_token'] : null;
+		// Debug logging
+		$debug_log = WP_CONTENT_DIR . '/repeater-debug.log';
+		$debug_enabled = true;
 
-		// Get fields on the source page
-		$source_page_fields = array();
-		foreach ( $form['fields'] as $field ) {
-			if ( isset( $field->pageNumber ) && $field->pageNumber == $source_page ) {
-				$source_page_fields[] = $field->id;
+		if ( $debug_enabled ) {
+			file_put_contents( $debug_log, "\n\n=== " . date('Y-m-d H:i:s') . " gform_capture_repeater_on_page_change ===\n", FILE_APPEND );
+			file_put_contents( $debug_log, "Source page: $source_page, Current page: $current_page\n", FILE_APPEND );
+		}
+
+		// FIRST: Check for hidden field backup from JavaScript (this is the most reliable source)
+		$preserved_values = array();
+		if ( isset( $_POST['gf_repeater2_preserved_values'] ) ) {
+			$preserved_values = json_decode( stripslashes( $_POST['gf_repeater2_preserved_values'] ), true );
+			if ( $debug_enabled ) {
+				file_put_contents( $debug_log, "Hidden field backup found with " . count( $preserved_values ) . " values:\n", FILE_APPEND );
+				foreach ( $preserved_values as $key => $val ) {
+					$val_str = is_array( $val ) ? json_encode( $val ) : substr( $val, 0, 50 );
+					file_put_contents( $debug_log, "  $key = $val_str\n", FILE_APPEND );
+				}
 			}
+		} else {
+			if ( $debug_enabled ) {
+				file_put_contents( $debug_log, "No hidden field backup found\n", FILE_APPEND );
+			}
+		}
+
+		// Get the stored field_id to repeater2Id mapping (persisted across page changes)
+		$mapping_transient_key = 'gf_repeater_mapping_form_' . $form['id'];
+		$field_repeater_mapping = get_transient( $mapping_transient_key );
+		if ( ! is_array( $field_repeater_mapping ) ) {
+			$field_repeater_mapping = array();
+		}
+
+		if ( $debug_enabled ) {
+			file_put_contents( $debug_log, "Existing field_id->repeater2Id mapping: " . json_encode( $field_repeater_mapping ) . "\n", FILE_APPEND );
 		}
 
 		foreach ( $form['fields'] as $field ) {
@@ -1079,33 +1172,124 @@ class GF_Field_Repeater2 extends GF_Field {
 
 			$field_id = $field->id;
 
-			// ONLY process repeater fields on the source page (the page we're leaving)
-			if ( ! in_array( $field_id, $source_page_fields ) ) {
-				continue;
-			}
-
-			$iteration_data = array();
+			// Start with existing transient data (to accumulate across page changes)
+			$transient_key = 'gf_repeater_form_' . $form['id'] . '_field_' . $field_id;
+			$existing_transient = get_transient( $transient_key );
+			$iteration_data = is_array( $existing_transient ) ? $existing_transient : array();
 
 			// Find the repeater2Id for this field
 			$repeater2Id = null;
+
+			// Method 1: Get from POST metadata (when repeater is on current page)
 			if ( isset( $_POST['input_' . $field_id] ) ) {
 				$metadata = json_decode( stripslashes( $_POST['input_' . $field_id] ), true );
 				if ( isset( $metadata['repeater2Id'] ) ) {
 					$repeater2Id = $metadata['repeater2Id'];
+					// Store mapping for later page changes
+					$field_repeater_mapping[ $field_id ] = $repeater2Id;
+					if ( $debug_enabled ) {
+						file_put_contents( $debug_log, "Got repeater2Id $repeater2Id from POST metadata for field $field_id\n", FILE_APPEND );
+					}
+				}
+			}
+
+			// Method 2: Get from stored mapping (from previous page changes)
+			if ( ! $repeater2Id && isset( $field_repeater_mapping[ $field_id ] ) ) {
+				$repeater2Id = $field_repeater_mapping[ $field_id ];
+				if ( $debug_enabled ) {
+					file_put_contents( $debug_log, "Got repeater2Id $repeater2Id from stored mapping for field $field_id\n", FILE_APPEND );
+				}
+			}
+
+			// Method 3: Infer from preserved values using repeater's child fields
+			if ( ! $repeater2Id && ! empty( $preserved_values ) && ! empty( $field->repeater2Children ) ) {
+				$child_field_ids = $field->repeater2Children;
+				if ( $debug_enabled ) {
+					file_put_contents( $debug_log, "Trying to infer repeater2Id for field $field_id using child fields: " . json_encode( $child_field_ids ) . "\n", FILE_APPEND );
+				}
+
+				// Search preserved values for any input that starts with a known child field ID
+				foreach ( $preserved_values as $input_name => $input_value ) {
+					if ( preg_match( '/^input_([\d]+)/', $input_name, $base_match ) ) {
+						$base_field_id = $base_match[1];
+						if ( in_array( $base_field_id, $child_field_ids ) ) {
+							// Found a child field - extract the repeater2Id
+							if ( preg_match( '/^input_[\d_.]+\-(\d+)\-\d+$/', $input_name, $id_match ) ) {
+								$repeater2Id = $id_match[1];
+								$field_repeater_mapping[ $field_id ] = $repeater2Id;
+								if ( $debug_enabled ) {
+									file_put_contents( $debug_log, "Inferred repeater2Id $repeater2Id for field $field_id from child field $base_field_id in input $input_name\n", FILE_APPEND );
+								}
+								break;
+							}
+						}
+					}
 				}
 			}
 
 			if ( ! $repeater2Id ) {
+				// Still no repeater2Id - check if we have existing transient data to preserve
+				if ( ! empty( $iteration_data ) ) {
+					if ( $debug_enabled ) {
+						file_put_contents( $debug_log, "No repeater2Id for field $field_id but keeping existing transient with " . count( $iteration_data ) . " iterations\n", FILE_APPEND );
+					}
+				} else {
+					if ( $debug_enabled ) {
+						file_put_contents( $debug_log, "No repeater2Id found for field $field_id and no existing transient, skipping\n", FILE_APPEND );
+					}
+				}
 				continue;
 			}
 
-			// Collect all renamed inputs for this repeater
+			if ( $debug_enabled ) {
+				file_put_contents( $debug_log, "Processing repeater field $field_id (repeater2Id: $repeater2Id, existing_iterations: " . count($iteration_data) . ")\n", FILE_APPEND );
+			}
+
+			// Method 1: Collect from hidden field backup (most reliable - JavaScript captured these)
+			if ( ! empty( $preserved_values ) ) {
+				foreach ( $preserved_values as $input_name => $input_value ) {
+					// Match pattern: input_{childId}-{repeaterId}-{iteration}
+					if ( preg_match( '/^input_([\d_.]+)-' . $repeater2Id . '-(\d+)$/', $input_name, $matches ) ) {
+						$child_field_id = $matches[1];
+						$iteration = $matches[2];
+
+						$parts = preg_split( '/[_.]/', $child_field_id );
+						$base_field_id = $parts[0];
+						$sub_input_id = isset( $parts[1] ) ? $parts[1] : null;
+
+						if ( ! isset( $iteration_data[ $iteration ] ) ) {
+							$iteration_data[ $iteration ] = array();
+						}
+
+						if ( ! isset( $iteration_data[ $iteration ][ $base_field_id ] ) ) {
+							$iteration_data[ $iteration ][ $base_field_id ] = array();
+						}
+
+						if ( is_array( $input_value ) ) {
+							$iteration_data[ $iteration ][ $base_field_id ] = array_merge( $iteration_data[ $iteration ][ $base_field_id ], $input_value );
+						} else {
+							if ( $sub_input_id !== null ) {
+								$iteration_data[ $iteration ][ $base_field_id ][ $sub_input_id ] = $input_value;
+							} else {
+								$iteration_data[ $iteration ][ $base_field_id ][] = $input_value;
+							}
+						}
+					}
+				}
+			}
+
+			// Method 2: Also collect from direct POST (fallback, in case hidden field wasn't set)
 			foreach ( $_POST as $input_name => $input_value ) {
 				// Match pattern: input_{childId}-{repeaterId}-{iteration}
 				// Note: childId can contain dots (Address: 173.3) or underscores (Name: 5_3)
 				if ( preg_match( '/^input_([\d_.]+)-' . $repeater2Id . '-(\d+)$/', $input_name, $matches ) ) {
 					$child_field_id = $matches[1];
 					$iteration = $matches[2];
+
+					// Only add if value is not empty (don't overwrite preserved values with empty)
+					if ( empty( $input_value ) ) {
+						continue;
+					}
 
 					// Extract base field ID and sub-input ID
 					// e.g., "172_3" -> base="172", sub="3"; "174" -> base="174", sub=null
@@ -1136,15 +1320,286 @@ class GF_Field_Repeater2 extends GF_Field {
 			}
 
 			// Store in transient for later retrieval during save
+			// Always store if we have data (whether from current page or accumulated from previous pages)
 			if ( ! empty( $iteration_data ) ) {
-				// Use resume token if available, otherwise use form ID (will be retrieved during save)
-				$key_base = $resume_token ? $resume_token : 'form_' . $form['id'];
-				$transient_key = 'gf_repeater_' . $key_base . '_field_' . $field_id;
-				set_transient( $transient_key, $iteration_data, HOUR_IN_SECONDS );
+				// Check if we have non-empty values (not just empty arrays)
+				$has_real_data = false;
+				foreach ( $iteration_data as $iter => $fields ) {
+					foreach ( $fields as $fid => $values ) {
+						if ( is_array( $values ) ) {
+							foreach ( $values as $v ) {
+								if ( ! empty( $v ) ) {
+									$has_real_data = true;
+									break 3;
+								}
+							}
+						} elseif ( ! empty( $values ) ) {
+							$has_real_data = true;
+							break 2;
+						}
+					}
+				}
+
+				if ( $has_real_data ) {
+					set_transient( $transient_key, $iteration_data, HOUR_IN_SECONDS );
+
+					if ( $debug_enabled ) {
+						file_put_contents( $debug_log, "Stored transient '$transient_key' with " . count( $iteration_data ) . " iterations (has_real_data: true)\n", FILE_APPEND );
+						file_put_contents( $debug_log, "Data: " . print_r( $iteration_data, true ) . "\n", FILE_APPEND );
+					}
+				} else {
+					if ( $debug_enabled ) {
+						file_put_contents( $debug_log, "Skipped storing transient for field $field_id - all values are empty\n", FILE_APPEND );
+					}
+				}
+			} else {
+				if ( $debug_enabled ) {
+					file_put_contents( $debug_log, "No iteration data found for field $field_id\n", FILE_APPEND );
+				}
+			}
+		}
+
+		// Store the field_id to repeater2Id mapping for use on subsequent page changes
+		if ( ! empty( $field_repeater_mapping ) ) {
+			set_transient( $mapping_transient_key, $field_repeater_mapping, HOUR_IN_SECONDS );
+			if ( $debug_enabled ) {
+				file_put_contents( $debug_log, "Stored field_id->repeater2Id mapping: " . json_encode( $field_repeater_mapping ) . "\n", FILE_APPEND );
 			}
 		}
 
 		return $form;
+	}
+
+	/**
+	 * Capture repeater values right before form submission (final submission, not page change).
+	 * This ensures all repeater data is available even if JavaScript re-initialization cleared some values.
+	 * Works similarly to gform_capture_repeater_on_page_change but for final submission.
+	 *
+	 * @param array $form The form being submitted.
+	 */
+	public static function gform_capture_repeater_on_submission( $form ) {
+		// Debug logging
+		$debug_log = WP_CONTENT_DIR . '/repeater-debug.log';
+		$debug_enabled = true;
+
+		if ( $debug_enabled ) {
+			file_put_contents( $debug_log, "\n\n=== " . date('Y-m-d H:i:s') . " gform_capture_repeater_on_submission ===\n", FILE_APPEND );
+			file_put_contents( $debug_log, "Plugin Version: " . GF_REPEATER_VERSION . "\n", FILE_APPEND );
+			file_put_contents( $debug_log, "Form ID: " . $form['id'] . "\n", FILE_APPEND );
+
+			// Check for hidden field backup from JavaScript
+			if ( isset( $_POST['gf_repeater2_preserved_values'] ) ) {
+				file_put_contents( $debug_log, "HIDDEN FIELD BACKUP FOUND with " . strlen( $_POST['gf_repeater2_preserved_values'] ) . " chars\n", FILE_APPEND );
+			} else {
+				file_put_contents( $debug_log, "HIDDEN FIELD BACKUP: NOT FOUND\n", FILE_APPEND );
+			}
+		}
+
+		// Get the preserved values from hidden field backup
+		$preserved_values = array();
+		if ( isset( $_POST['gf_repeater2_preserved_values'] ) ) {
+			$preserved_values = json_decode( stripslashes( $_POST['gf_repeater2_preserved_values'] ), true );
+			if ( $debug_enabled && ! empty( $preserved_values ) ) {
+				file_put_contents( $debug_log, "Decoded preserved values:\n", FILE_APPEND );
+				foreach ( $preserved_values as $key => $val ) {
+					$val_str = is_array( $val ) ? json_encode( $val ) : substr( $val, 0, 50 );
+					file_put_contents( $debug_log, "  $key = $val_str\n", FILE_APPEND );
+				}
+			}
+		}
+
+		// Get the stored field_id to repeater2Id mapping (from previous page changes)
+		$mapping_transient_key = 'gf_repeater_mapping_form_' . $form['id'];
+		$field_repeater_mapping = get_transient( $mapping_transient_key );
+		if ( ! is_array( $field_repeater_mapping ) ) {
+			$field_repeater_mapping = array();
+		}
+
+		if ( $debug_enabled ) {
+			file_put_contents( $debug_log, "field_id->repeater2Id mapping: " . json_encode( $field_repeater_mapping ) . "\n", FILE_APPEND );
+		}
+
+		foreach ( $form['fields'] as $field ) {
+			if ( $field->type !== 'repeater2' ) {
+				continue;
+			}
+
+			$field_id = $field->id;
+
+			// Start with existing transient data (accumulated from previous page changes)
+			$transient_key = 'gf_repeater_form_' . $form['id'] . '_field_' . $field_id;
+			$existing_transient = get_transient( $transient_key );
+			$iteration_data = is_array( $existing_transient ) ? $existing_transient : array();
+
+			if ( $debug_enabled ) {
+				file_put_contents( $debug_log, "Field $field_id: Existing transient has " . count( $iteration_data ) . " iterations\n", FILE_APPEND );
+			}
+
+			// Find the repeater2Id for this field
+			$repeater2Id = null;
+
+			// Method 1: Get from POST metadata (when repeater is on current page)
+			if ( isset( $_POST['input_' . $field_id] ) ) {
+				$metadata = json_decode( stripslashes( $_POST['input_' . $field_id] ), true );
+				if ( isset( $metadata['repeater2Id'] ) ) {
+					$repeater2Id = $metadata['repeater2Id'];
+					if ( $debug_enabled ) {
+						file_put_contents( $debug_log, "Got repeater2Id $repeater2Id from POST metadata for field $field_id\n", FILE_APPEND );
+					}
+				}
+			}
+
+			// Method 2: Get from stored mapping (from previous page changes)
+			if ( ! $repeater2Id && isset( $field_repeater_mapping[ $field_id ] ) ) {
+				$repeater2Id = $field_repeater_mapping[ $field_id ];
+				if ( $debug_enabled ) {
+					file_put_contents( $debug_log, "Got repeater2Id $repeater2Id from stored mapping for field $field_id\n", FILE_APPEND );
+				}
+			}
+
+			// Method 3: Infer from preserved values using repeater's child fields
+			if ( ! $repeater2Id && ! empty( $preserved_values ) && ! empty( $field->repeater2Children ) ) {
+				$child_field_ids = $field->repeater2Children;
+				foreach ( $preserved_values as $input_name => $input_value ) {
+					if ( preg_match( '/^input_([\d]+)/', $input_name, $base_match ) ) {
+						$base_field_id = $base_match[1];
+						if ( in_array( $base_field_id, $child_field_ids ) ) {
+							if ( preg_match( '/^input_[\d_.]+\-(\d+)\-\d+$/', $input_name, $id_match ) ) {
+								$repeater2Id = $id_match[1];
+								if ( $debug_enabled ) {
+									file_put_contents( $debug_log, "Inferred repeater2Id $repeater2Id for field $field_id from preserved values\n", FILE_APPEND );
+								}
+								break;
+							}
+						}
+					}
+				}
+			}
+
+			// If we have existing transient data but no repeater2Id, keep the existing data
+			if ( ! $repeater2Id && ! empty( $iteration_data ) ) {
+				if ( $debug_enabled ) {
+					file_put_contents( $debug_log, "No repeater2Id for field $field_id but keeping existing transient with " . count( $iteration_data ) . " iterations\n", FILE_APPEND );
+				}
+				// Don't skip - we already have accumulated data, just don't add more
+				continue;
+			}
+
+			if ( ! $repeater2Id ) {
+				if ( $debug_enabled ) {
+					file_put_contents( $debug_log, "No repeater2Id found for field $field_id, skipping\n", FILE_APPEND );
+				}
+				continue;
+			}
+
+			if ( $debug_enabled ) {
+				file_put_contents( $debug_log, "Processing repeater field ID: $field_id (repeater2Id: $repeater2Id)\n", FILE_APPEND );
+			}
+
+			// Collect from hidden field backup (most reliable - JavaScript captured these)
+			if ( ! empty( $preserved_values ) ) {
+				foreach ( $preserved_values as $input_name => $input_value ) {
+					if ( preg_match( '/^input_([\d_.]+)-' . $repeater2Id . '-(\d+)$/', $input_name, $matches ) ) {
+						$child_field_id = $matches[1];
+						$iteration = $matches[2];
+
+						$parts = preg_split( '/[_.]/', $child_field_id );
+						$base_field_id = $parts[0];
+						$sub_input_id = isset( $parts[1] ) ? $parts[1] : null;
+
+						if ( ! isset( $iteration_data[ $iteration ] ) ) {
+							$iteration_data[ $iteration ] = array();
+						}
+
+						if ( ! isset( $iteration_data[ $iteration ][ $base_field_id ] ) ) {
+							$iteration_data[ $iteration ][ $base_field_id ] = array();
+						}
+
+						if ( is_array( $input_value ) ) {
+							$iteration_data[ $iteration ][ $base_field_id ] = array_merge( $iteration_data[ $iteration ][ $base_field_id ], $input_value );
+						} else {
+							if ( $sub_input_id !== null ) {
+								$iteration_data[ $iteration ][ $base_field_id ][ $sub_input_id ] = $input_value;
+							} else {
+								$iteration_data[ $iteration ][ $base_field_id ][] = $input_value;
+							}
+						}
+					}
+				}
+			}
+
+			// Also collect from direct POST (in case current page has a repeater)
+			foreach ( $_POST as $input_name => $input_value ) {
+				if ( preg_match( '/^input_([\d_.]+)-' . $repeater2Id . '-(\d+)$/', $input_name, $matches ) ) {
+					$child_field_id = $matches[1];
+					$iteration = $matches[2];
+
+					// Only add if value is not empty
+					if ( empty( $input_value ) ) {
+						continue;
+					}
+
+					$parts = preg_split( '/[_.]/', $child_field_id );
+					$base_field_id = $parts[0];
+					$sub_input_id = isset( $parts[1] ) ? $parts[1] : null;
+
+					if ( ! isset( $iteration_data[ $iteration ] ) ) {
+						$iteration_data[ $iteration ] = array();
+					}
+
+					if ( ! isset( $iteration_data[ $iteration ][ $base_field_id ] ) ) {
+						$iteration_data[ $iteration ][ $base_field_id ] = array();
+					}
+
+					if ( is_array( $input_value ) ) {
+						$iteration_data[ $iteration ][ $base_field_id ] = array_merge( $iteration_data[ $iteration ][ $base_field_id ], $input_value );
+					} else {
+						if ( $sub_input_id !== null ) {
+							$iteration_data[ $iteration ][ $base_field_id ][ $sub_input_id ] = $input_value;
+						} else {
+							$iteration_data[ $iteration ][ $base_field_id ][] = $input_value;
+						}
+					}
+				}
+			}
+
+			// Store in transient for retrieval during get_value_save_entry
+			if ( ! empty( $iteration_data ) ) {
+				// Check if we have real non-empty values
+				$has_real_data = false;
+				foreach ( $iteration_data as $iter => $fields ) {
+					foreach ( $fields as $fid => $values ) {
+						if ( is_array( $values ) ) {
+							foreach ( $values as $v ) {
+								if ( ! empty( $v ) ) {
+									$has_real_data = true;
+									break 3;
+								}
+							}
+						} elseif ( ! empty( $values ) ) {
+							$has_real_data = true;
+							break 2;
+						}
+					}
+				}
+
+				if ( $has_real_data ) {
+					set_transient( $transient_key, $iteration_data, HOUR_IN_SECONDS );
+
+					if ( $debug_enabled ) {
+						file_put_contents( $debug_log, "Stored transient '$transient_key' with " . count( $iteration_data ) . " iterations:\n" . print_r( $iteration_data, true ) . "\n", FILE_APPEND );
+					}
+				} else {
+					if ( $debug_enabled ) {
+						file_put_contents( $debug_log, "Skipped storing - all values are empty for field $field_id\n", FILE_APPEND );
+					}
+				}
+			} else {
+				if ( $debug_enabled ) {
+					file_put_contents( $debug_log, "No iteration data found for field $field_id\n", FILE_APPEND );
+				}
+			}
+		}
 	}
 
 	public static function gform_modify_incomplete_submission_data( $submission, $resume_token, $form ) {
@@ -1329,12 +1784,59 @@ class GF_Field_Repeater2 extends GF_Field {
 
 	public static function gform_save_repeater_field_value( $value, $lead, $field, $form, $input_id ) {
 		// This hook fires when GF is saving individual field values
-		// Note: This hook only runs for fields on the current page
+		// IMPORTANT: get_value_save_entry already handles transient retrieval and returns the correct value
+		// We should NOT override it with empty POST data
+		// This filter is now only used as a fallback for edge cases
 
 		if ( $field->type !== 'repeater2' ) {
 			return $value;
 		}
 
+		// Debug logging
+		$debug_log = WP_CONTENT_DIR . '/repeater-debug.log';
+		$debug_enabled = true;
+
+		if ( $debug_enabled ) {
+			file_put_contents( $debug_log, "\n=== gform_save_repeater_field_value for field " . $field->id . " ===\n", FILE_APPEND );
+			file_put_contents( $debug_log, "Incoming value type: " . gettype( $value ) . "\n", FILE_APPEND );
+			file_put_contents( $debug_log, "Incoming value: " . substr( is_string( $value ) ? $value : print_r( $value, true ), 0, 500 ) . "\n", FILE_APPEND );
+		}
+
+		// If the value from get_value_save_entry is already good (non-empty array/JSON), use it
+		if ( ! empty( $value ) ) {
+			$decoded = is_string( $value ) ? json_decode( $value, true ) : $value;
+			if ( is_array( $decoded ) && ! empty( $decoded ) ) {
+				// Check if the decoded value has actual data (not just empty arrays)
+				$has_data = false;
+				foreach ( $decoded as $iteration => $fields ) {
+					if ( is_array( $fields ) ) {
+						foreach ( $fields as $field_id => $field_values ) {
+							if ( is_array( $field_values ) ) {
+								foreach ( $field_values as $v ) {
+									if ( ! empty( $v ) ) {
+										$has_data = true;
+										break 3;
+									}
+								}
+							} elseif ( ! empty( $field_values ) ) {
+								$has_data = true;
+								break 2;
+							}
+						}
+					}
+				}
+
+				if ( $has_data ) {
+					if ( $debug_enabled ) {
+						file_put_contents( $debug_log, "Using value from get_value_save_entry (has real data)\n", FILE_APPEND );
+					}
+					// Return the value as-is (it's already properly formatted from get_value_save_entry)
+					return $value;
+				}
+			}
+		}
+
+		// Only try to collect from POST if get_value_save_entry didn't provide good data
 		// Find the repeater2Id for this field
 		$repeater2Id = null;
 		if ( isset( $_POST['input_' . $field->id] ) ) {
@@ -1345,6 +1847,9 @@ class GF_Field_Repeater2 extends GF_Field {
 		}
 
 		if ( ! $repeater2Id ) {
+			if ( $debug_enabled ) {
+				file_put_contents( $debug_log, "No repeater2Id, returning original value\n", FILE_APPEND );
+			}
 			return $value;
 		}
 
@@ -1354,11 +1859,15 @@ class GF_Field_Repeater2 extends GF_Field {
 		foreach ( $_POST as $input_name => $input_value ) {
 			// Match pattern: input_{childId}-{repeaterId}-{iteration}
 			if ( preg_match( '/^input_([\d_.]+)-' . $repeater2Id . '-(\d+)$/', $input_name, $matches ) ) {
+				// Only add non-empty values
+				if ( empty( $input_value ) ) {
+					continue;
+				}
+
 				$child_field_id = $matches[1];
 				$iteration = $matches[2];
 
 				// Extract base field ID and sub-input ID
-				// e.g., "172_3" -> base="172", sub="3"; "174" -> base="174", sub=null
 				$parts = preg_split( '/[_.]/', $child_field_id );
 				$base_field_id = $parts[0];
 				$sub_input_id = isset( $parts[1] ) ? $parts[1] : null;
@@ -1373,9 +1882,11 @@ class GF_Field_Repeater2 extends GF_Field {
 
 				// Handle array values (like checkboxes) and single values
 				if ( is_array( $input_value ) ) {
-					$iteration_data[ $iteration ][ $base_field_id ] = array_merge( $iteration_data[ $iteration ][ $base_field_id ], $input_value );
+					$non_empty = array_filter( $input_value, function( $v ) { return ! empty( $v ); } );
+					if ( ! empty( $non_empty ) ) {
+						$iteration_data[ $iteration ][ $base_field_id ] = array_merge( $iteration_data[ $iteration ][ $base_field_id ], $non_empty );
+					}
 				} else {
-					// Store with sub-input ID as key if present, otherwise append
 					if ( $sub_input_id !== null ) {
 						$iteration_data[ $iteration ][ $base_field_id ][ $sub_input_id ] = $input_value;
 					} else {
@@ -1386,9 +1897,15 @@ class GF_Field_Repeater2 extends GF_Field {
 		}
 
 		if ( ! empty( $iteration_data ) ) {
+			if ( $debug_enabled ) {
+				file_put_contents( $debug_log, "Using POST data (fallback): " . json_encode( $iteration_data ) . "\n", FILE_APPEND );
+			}
 			return json_encode( $iteration_data );
 		}
 
+		if ( $debug_enabled ) {
+			file_put_contents( $debug_log, "Returning original value (no POST data found)\n", FILE_APPEND );
+		}
 		return $value;
 	}
 
@@ -1683,6 +2200,30 @@ class GF_Field_Repeater2 extends GF_Field {
 		}
 
 		return json_encode( $submission );
+	}
+
+	/**
+	 * Clean up repeater transients after successful form submission
+	 * This prevents stale data from accumulating and potentially affecting future submissions
+	 *
+	 * @param array $entry The entry that was created
+	 * @param array $form The form object
+	 */
+	public static function gform_cleanup_repeater_transients( $entry, $form ) {
+		// Find all repeater fields in the form and delete their transients
+		foreach ( $form['fields'] as $field ) {
+			if ( $field->type !== 'repeater2' ) {
+				continue;
+			}
+
+			$field_id = $field->id;
+			$transient_key = 'gf_repeater_form_' . $form['id'] . '_field_' . $field_id;
+			delete_transient( $transient_key );
+		}
+
+		// Also clean up the field_id to repeater2Id mapping transient
+		$mapping_transient_key = 'gf_repeater_mapping_form_' . $form['id'];
+		delete_transient( $mapping_transient_key );
 	}
 }
 GF_Fields::register(new GF_Field_Repeater2());
